@@ -4,7 +4,7 @@ This is a library for searching and/or updating netplan yaml files.
 # Example Usage
 
 ```
-import NetplanEditor
+from netplan_editor import NetplanEditor,NetplanEditorException
 import logging
 
 logger = logging.getLogger('my-netplan-editor')
