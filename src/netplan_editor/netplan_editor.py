@@ -63,7 +63,7 @@ class NetplanEditor():
             self.logger = logger
             return
 
-        self.logger = logging.getLogger('Netplan')
+        self.logger = logging.getLogger('netplan-editor')
         logging.basicConfig(level='INFO')
 
     def get_netplan_srcfile(self, also_search_files=[]):
