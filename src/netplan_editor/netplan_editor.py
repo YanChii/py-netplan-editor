@@ -77,7 +77,7 @@ class NetplanEditor():
             if os.path.isfile(srcfile):
                 return srcfile
 
-        raise NetplanException(f'No netplan config was found (searched files: {srcfiles})')
+        raise NetplanEditorException(f'No netplan config was found (searched files: {srcfiles})')
 
     def _start_tracking_conf_changes(self):
         self.netplan_orig = copy.deepcopy(self.netplan)
@@ -93,7 +93,7 @@ class NetplanEditor():
             self._start_tracking_conf_changes()
             return
 
-        raise NetplanException('Error reading netplan')
+        raise NetplanEditorException('Error reading netplan')
 
 
     def write(self, outfile=''):
