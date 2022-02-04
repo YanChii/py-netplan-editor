@@ -1,7 +1,5 @@
 [build-system]
 requires = [
     "setuptools>=42",
-    "dpath",
-    "pyyaml"
 ]
 build-backend = "setuptools.build_meta"
