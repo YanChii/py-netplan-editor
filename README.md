@@ -1,6 +1,11 @@
 # Netplan Editor
 This is a library for searching and/or updating netplan yaml files.
 
+# Install
+```
+pip install git+https://github.com/YanChii/py-netplan-editor.git
+```
+
 # Example Usage
 
 ```
