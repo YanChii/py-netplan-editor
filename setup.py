@@ -29,4 +29,9 @@ setuptools.setup(
         "dpath",
 	"pyyaml",
     ],
+    entry_points = {
+        'console_scripts': [
+            'update-netplan = netplan_editor.update_netplan_cmd:update_netplan',
+        ],
+    },
 )
