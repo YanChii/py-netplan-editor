@@ -5,10 +5,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name = "netplan_editor",
-    version = "0.0.2",
+    version = "0.3",
     author = "YanChii",
     author_email = "janci@binaryparadise.com",
-    description = "Library for searching and editing netplan yaml config files",
+    description = "Library for searching and editing netplan yaml config files. Lib + cli (update-netplan).",
     long_description = long_description,
     long_description_content_type = "text/markdown",
     url = "https://github.com/yanchii/py-netplan-editor",
