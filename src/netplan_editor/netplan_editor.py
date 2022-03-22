@@ -4,6 +4,8 @@
 #
 
 import yaml
+import json
+import re
 import os
 import sys
 import copy
@@ -12,11 +14,17 @@ import logging
 
 
 def yaml_str_representer(dumper, data):
-    if type(data) == str and data.isdigit():
-        # if data is number, represent it as number to avoid quotes around value
-        # (netplan parser doesn't actually care, it interprets everything as string...
-        # but we don't want to change variable formatting in the yaml output)
-        return dumper.represent_scalar('tag:yaml.org,2002:int', data, style=None)
+    if type(data) == str:
+        if data.isdigit():
+            # if data is number, represent it as number to avoid quotes around value
+            # (netplan parser doesn't actually care, it interprets everything as string...
+            # but we don't want to change variable formatting in the yaml output)
+            return dumper.represent_scalar('tag:yaml.org,2002:int', data, style=None)
+
+        elif re.match('^true$|^false$', data, re.IGNORECASE):
+            # avoid quoting bool
+            return dumper.represent_scalar('tag:yaml.org,2002:bool', data, style=None)
+
     return dumper.represent_scalar('tag:yaml.org,2002:str', data, style=None)
 
 
@@ -217,24 +225,44 @@ class NetplanEditor():
 
         return found_paths
 
+    @staticmethod
+    def _convert_input_val(new_val):
+        """
+        Try to find json in the input. It recognizes dicts, lists and plain numbers (as int).
+        If unable to parse, regard value as plain string regardless the content.
+        """
+        try:
+            return json.loads(new_val)
+        except json.decoder.JSONDecodeError:
+            # if json parsing fails, leave the original input unchanged
+            return new_val
+
     def get_val(self, path):
-        #path = x[0]
-        #val = x[1]
-        ## convert val to raw value if it's not list or str
-        #val = val if val is list or val is dict else val[0]
         return dpath.util.get(self.netplan, path)
 
     def set_val(self, path, new_val):
+        """
+        Params:
+        path: full dpath to variable. The variable must already exist.
+        new_val: plain value or json
+        """
         old_val = self.get_val(path)
-        self.log.info(f'Changing "{path}" from "{old_val}" to "{new_val}"')
+        new_val = self._convert_input_val(new_val)
+        self.log.info(f'Changing "{path}" from "{old_val}" to "{new_val}" as type "{type(new_val)}"')
         return dpath.util.set(self.netplan, path, new_val)
 
-    def new_entry(self, new_path, val):
-        self.log.info(f'Creating "{new_path}" with value "{val}"')
-        return dpath.util.new(self.netplan, path, new_val)
+    def new_entry(self, new_path, new_val):
+        """
+        Params:
+        new_path: full dpath to new variable. The variable must not exist yet.
+        new_val: plain value or json
+        """
+        val = self._convert_input_val(new_val)
+        self.log.info(f'Creating "{new_path}" with value "{new_val}" as type "{type(new_val)}"')
+        return dpath.util.new(self.netplan, new_path, new_val)
 
     def del_entry(self, glob):
-        old_val = self.get_val(path)
+        old_val = self.get_val(glob)
         self.log.info(f'Deleting entry "{glob}" with value "{old_val}"')
         return dpath.util.delete(self.netplan, glob)
 

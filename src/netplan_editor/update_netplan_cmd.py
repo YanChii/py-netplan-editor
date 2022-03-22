@@ -1,5 +1,6 @@
 
 import sys
+import re
 from argparse import ArgumentParser
 import logging
 
@@ -21,15 +22,36 @@ Usage:
 Examples:
 {sys.argv[0]} search_params nameservers/search
 {sys.argv[0]} get network/ethernets/eno1/mtu
+{sys.argv[0]} set network/ethernets/eno1/mtu 1400
+{sys.argv[0]} set network/ethernets/eno1/nameservers/search '["sub.example.com", "example.com"]'
+{sys.argv[0]} set_all nameservers/search '["sub.example.com", "example.com"]'
+
+Remarks:
+- target_value can be either plain value or json
+- set* requires the path that already exists
 ''')
     sys.exit(exit_val)
 
 
 def update_netplan():
 
+    loglevel = 'WARN'   # default
+
+    for arg in sys.argv[1:]:
+        if arg == '-h':
+            print_help(0)
+        elif arg == '-v':
+            loglevel='INFO'
+        elif arg == '-vv':
+            loglevel='DEBUG'
+        elif not re.match('^-', arg):
+            # stop processing switches
+            break
+
+        del sys.argv[1]
+
     logger = logging.getLogger('netplan_editor')
-    #logging.basicConfig(level='WARN')
-    logging.basicConfig(level='INFO')
+    logging.basicConfig(level=loglevel)
 
     if len(sys.argv) < 2:
         print_help(1)
@@ -63,6 +85,16 @@ def update_netplan():
         print(val, str(type(val)))
 
 
+    elif cmd == 'delete':
+        try:
+            target_path = sys.argv[2]
+        except IndexError:
+            print_help(1)
+
+        val = netplan.del_entry(target_path)
+        netplan.write()
+
+
     elif cmd == 'set':
         try:
             target_path = sys.argv[2]
@@ -86,6 +118,16 @@ def update_netplan():
 
         netplan.write()
 
+
+    elif cmd == 'add':
+        try:
+            target_path = sys.argv[2]
+            target_val = sys.argv[3]
+        except IndexError:
+            print_help(1)
+
+        netplan.new_entry(target_path, target_val)
+        netplan.write()
 
     else:
         print_help(1, f'Unknown command: {cmd}')
