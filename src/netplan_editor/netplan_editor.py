@@ -11,6 +11,15 @@ import dpath.util
 import logging
 
 
+def yaml_str_representer(dumper, data):
+    if type(data) == str and data.isdigit():
+        # if data is number, represent it as number to avoid quotes around value
+        # (netplan parser doesn't actually care, it interprets everything as string...
+        # but we don't want to change variable formatting in the yaml output)
+        return dumper.represent_scalar('tag:yaml.org,2002:int', data, style=None)
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style=None)
+
+
 class NetplanEditorException(Exception):
     pass
 
@@ -113,7 +122,9 @@ class NetplanEditor():
 
         self.log.info(f'Writing netplan to {outf}')
         with open(outf, "w") as file:
-            docs = yaml.dump(self.netplan, file, sort_keys=False)
+            # interpreter to remove quotes from numbers
+            yaml.add_representer(str, yaml_str_representer)
+            yaml.dump(self.netplan, file, sort_keys=False, default_style=None, default_flow_style=False)
 
         # Write was successfull. Do we need to delete source file? (see convert_from_files 
         # argument of init()).
@@ -176,18 +187,22 @@ class NetplanEditor():
         """
         return dpath.util.search(self.netplan, search_string, yielded=True)
 
-    def search_all_interfaces(self, key_glob: str) -> list:
+    def search_params_all_interfaces(self, key_glob: str) -> list:
         """
         Searches the netplan interfaces config in sections [ethernets, bridges, vlans] 
         and returns paths that match key_glob parameter (e.g. addresses, nameservers/addresses, 
         nameservers/search, gateway4, mtu, etc).
+
         Params:
-        key: key to search under interfaces config
+        key_glob: glob pattern to match keys in all defined interfaces config
+
         Examples:
-        search_interface_conf('addresses') - return all interfaces that have IP address configured
-        search_interface_conf('nameservers/search') - return all interfaces that have dns search domains configured
+        search_params_all_interfaces('addresses') - return all interfaces that have IP address configured
+        search_params_all_interfaces('nameservers/search') - return all interfaces that have dns search domains configured
+
         Return value:
         tuple of path (that can be used to edit the content) and the current content under the found key.
+
         Example return value:
         [
         ('network/bridges/admin/addresses', ['10.20.25.40/24'])
@@ -203,10 +218,15 @@ class NetplanEditor():
         return found_paths
 
     def get_val(self, path):
-        return dpath.util.values(self.netplan, path)
+        #path = x[0]
+        #val = x[1]
+        ## convert val to raw value if it's not list or str
+        #val = val if val is list or val is dict else val[0]
+        return dpath.util.get(self.netplan, path)
 
     def set_val(self, path, new_val):
-        self.log.info(f'Setting "{path}" to "{new_val}"')
+        old_val = self.get_val(path)
+        self.log.info(f'Changing "{path}" from "{old_val}" to "{new_val}"')
         return dpath.util.set(self.netplan, path, new_val)
 
     def new_entry(self, new_path, val):
@@ -214,7 +234,8 @@ class NetplanEditor():
         return dpath.util.new(self.netplan, path, new_val)
 
     def del_entry(self, glob):
-        self.log.info(f'Deleting entry "{glob}"')
+        old_val = self.get_val(path)
+        self.log.info(f'Deleting entry "{glob}" with value "{old_val}"')
         return dpath.util.delete(self.netplan, glob)
 
 
