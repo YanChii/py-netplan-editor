@@ -35,41 +35,53 @@ class NetplanEditorException(Exception):
 class NetplanEditor():
     netplan: dict       # main conf
     netplan_orig: dict  # for tracking changes
-    srcfile: str        # where was the main conf read from
-    confname: str       # where will be the main conf saved
     netplan_dir: str    # base netplan directory
     logger: logging.RootLogger
 
     # defaults:
     default_netplan_dir='/etc/netplan'
-    default_target_confname='10-netplan.yml'
 
 
-    def __init__(self, target_confname=None, netplan_dir=None, convert_from_files=[], logger=None):
+    def __init__(self, conf_file=None, netplan_dir=None, logger=None):
         """
         Initializes netplan object, reads and parses netplan conf files.
         Args:
-        target_confname - file to read the conf from and save the conf to. If it doesn't
-                          exist, convert_from_files argument is examined for netplan source.
-                          It can be relative or absolute path.
-                          Default: 10-netplan.yml
         netplan_dir - base directory for netplan files. Default: /etc/netplan
-        convert_from_files - list of filenames to search for when target_confname is not present.
-                             First existing file is read as config and no further files are checked.
-                             During Netplan.write() the source file is deleted and replaced by
-                             target_confname.
-        logger - logger object. If not provided, a new default one is created.
+        conf_file   - file to read the conf from and save the conf to.
+                      Default: None -> search all files in netplan_dir.
+        logger      - logger object. If not provided, a new default one is created.
         """
         self._init_logging(logger)
 
-        self.confname = target_confname if target_confname else self.default_target_confname
         self.netplan_dir = netplan_dir if netplan_dir else self.default_netplan_dir
 
-        if not self.confname.startswith('/'):
-            self.confname = f'{self.netplan_dir}/{self.confname}'
+        conf_files = []
+
+        if conf_file:
+            # explicit file was specified, skip searching other files
+            if not conf_file.startswith('/'):
+                conf_file = f'{self.netplan_dir}/{conf_file}'
+            conf_files.append(conf_file)
+
+        else:
+            # search for all *.yaml files in netplan_dir
+            for f in os.listdir(self.netplan_dir):
+                # make the full path
+                ff = os.path.join(self.netplan_dir, f)
+                if os.path.isfile(ff) and (ff.endswith('.yml') or ff.endswith('.yaml')):
+                    conf_files.append(ff)
+
+        if not conf_files:
+            raise NetplanEditorException(f'No netplan config was found (searched dir: {self.netplan_dir})')
+
+        self.netplan = {}
+        for conf in conf_files:
+            self.netplan[conf] = self.parse(conf)
             
-        self.srcfile = self.get_netplan_srcfile(convert_from_files)
-        self.parse()
+        self._start_tracking_conf_changes()
+
+        # interpreter to remove quotes from numbers
+        yaml.add_representer(str, yaml_str_representer)
 
     @property
     def log(self) -> logging.RootLogger:
@@ -83,89 +95,33 @@ class NetplanEditor():
         self.logger = logging.getLogger('netplan-editor')
         logging.basicConfig(level='INFO')
 
-    def get_netplan_srcfile(self, also_search_files=[]):
-        srcfiles = [self.confname]
-        for f in also_search_files:
-            if not f.startswith('/'):
-                f = f'{self.netplan_dir}/{f}'
-            srcfiles.append(f)
-
-        for srcfile in srcfiles:
-            if os.path.isfile(srcfile):
-                return srcfile
-
-        raise NetplanEditorException(f'No netplan config was found (searched files: {srcfiles})')
-
     def _start_tracking_conf_changes(self):
         self.netplan_orig = copy.deepcopy(self.netplan)
 
-    def changed(self):
-        return self.netplan != self.netplan_orig
+    def changed(self, conf):
+        return self.netplan[conf] != self.netplan_orig[conf]
 
-    def parse(self):
-        self.log.info(f'Parsing {self.srcfile}')
+    def parse(self, conffile):
 
-        with open(self.srcfile) as file:
-            self.netplan = yaml.load(file, Loader=yaml.FullLoader)
-            self._start_tracking_conf_changes()
-            return
+        with open(conffile) as file:
+            self.log.debug(f'Parsing {conffile}')
+            return yaml.load(file, Loader=yaml.FullLoader)
 
-        raise NetplanEditorException('Error reading netplan')
+        raise NetplanEditorException(f'Error reading netplan file "{conffile}"')
 
 
-    def write(self, outfile=''):
-        if not self.changed():
-            self.log.info(f'No changes. Not writing netplan file.')
-            return
+    def write(self):
 
-        if not outfile:
-            # default outfile
-            outf = self.confname
-        elif outfile.startswith('/'):
-            # full path, take as given
-            outf = outfile
-        else:
-            # relative path, add netplan_dir
-            outf = f'{self.netplan_dir}/{outfile}'
-
-        self.log.info(f'Writing netplan to {outf}')
-        with open(outf, "w") as file:
-            # interpreter to remove quotes from numbers
-            yaml.add_representer(str, yaml_str_representer)
-            yaml.dump(self.netplan, file, sort_keys=False, default_style=None, default_flow_style=False)
-
-        # Write was successfull. Do we need to delete source file? (see convert_from_files 
-        # argument of init()).
-        if self.srcfile != self.confname:
-            self.log.info(f'Removing original netplan file "{self.srcfile}"')
-            os.remove(self.srcfile)
-            # now we have only one source file
-            self.srcfile = self.confname
+        for conf in self.netplan.keys():
+            if not self.changed(conf):
+                self.log.debug(f'No changes. Not writing netplan file.')
+                continue
+            with open(conf, "w") as file:
+                self.log.info(f'Writing netplan file "{conf}"')
+                yaml.dump(self.netplan[conf], file, sort_keys=False, default_style=None, default_flow_style=False)
 
         # reset conf changed state
         self._start_tracking_conf_changes()
-
-    #def search_interface_conf(self, key:str):
-    #    """
-    #    Searches the netplan interfaces config in sections [ethernets, bridges, vlans] 
-    #    and returns path that has KEY present (e.g. addresses, nameservers.addresses, 
-    #    nameservers.search, gateway4, mtu, etc)
-    #    Params:
-    #    key: key to search under interfaces config
-    #    Example:
-    #    search_interface_conf(addresses) - return all interfaces that have IP address configured
-    #    """
-    #    sections = ['ethernets', 'bridges', 'vlans']
-
-    #    found_paths = []
-    #    for subsection in [x for x in sections if x in self.netplan['network']]:
-    #        for interface in self.netplan['network'][subsection]:
-    #            if key in self.netplan['network'][subsection][interface]:
-    #                found_path = ('network', subsection, interface, key)
-    #                #self.log.debug(f"Found section {found_path}")
-    #                found_paths.append(found_path)
-
-    #    return found_paths
 
     @property
     def conf(self):
@@ -193,7 +149,13 @@ class NetplanEditor():
         For more info see
         https://github.com/dpath-maintainers/dpath-python#searching
         """
-        return dpath.util.search(self.netplan, search_string, yielded=True)
+
+        result = []
+        for netplan_file in self.netplan.keys():
+            for x in dpath.util.search(self.netplan[netplan_file], search_string, yielded=True):
+                result.append((netplan_file,)+x)
+
+        return result
 
     def search_params_all_interfaces(self, key_glob: str) -> list:
         """
@@ -209,11 +171,11 @@ class NetplanEditor():
         search_params_all_interfaces('nameservers/search') - return all interfaces that have dns search domains configured
 
         Return value:
-        tuple of path (that can be used to edit the content) and the current content under the found key.
+        tuple of filename that contains the match, the key (a path that can be used to edit the value) and the current value under the found key.
 
         Example return value:
         [
-        ('network/bridges/admin/addresses', ['10.20.25.40/24'])
+        ('/etc/netplan/30-netplan.yaml', 'network/bridges/admin/addresses', ['10.20.25.40/24'])
         ]
         """
         sections = ['ethernets', 'bridges', 'vlans']
@@ -237,34 +199,113 @@ class NetplanEditor():
             # if json parsing fails, leave the original input unchanged
             return new_val
 
-    def get_val(self, path):
-        return dpath.util.get(self.netplan, path)
 
-    def set_val(self, path, new_val):
+    def _match_1st_source_file(self, path):
+        for conf in self.netplan.keys():
+            try:
+                dpath.util.get(self.netplan[conf], path)
+                return conf
+            except KeyError:
+                pass
+
+        # no path was found in any file
+        return None
+
+
+    def get_val(self, path):
+        for netplan in self.netplan.values():
+            try:
+                return dpath.util.get(netplan, path)
+            except KeyError:
+                pass
+        # no path was found in any file
+        return None
+
+    def set_val(self, path, new_val, in_file=''):
         """
+        Conf files with alphabetically higher number have a precedence (they override the earlier ones).
+
         Params:
         path: full dpath to variable. The variable must already exist.
         new_val: plain value or json
+        in_file: force file where to change the value.
         """
-        old_val = self.get_val(path)
-        new_val = self._convert_input_val(new_val)
-        self.log.info(f'Changing "{path}" from "{old_val}" to "{new_val}" as type "{type(new_val)}"')
-        return dpath.util.set(self.netplan, path, new_val)
+        if in_file:
+            if not os.path.isfile(in_file):
+                raise NetplanEditorException(f'File "{in_file}" was not found"')
+            conf = in_file
 
-    def new_entry(self, new_path, new_val):
+        else:
+            conf = self._match_1st_source_file(path)
+
+        if conf:
+            old_val = dpath.util.get(self.netplan[conf], path)
+            new_val = self._convert_input_val(new_val)
+            self.log.info(f'Changing "{path}" in file "{conf}" from "{old_val}" to "{new_val}" as type "{type(new_val)}"')
+            dpath.util.set(self.netplan[conf], path, new_val)
+            return True
+
+        return False
+
+    def new_entry(self, new_path, new_val, in_file=''):
         """
         Params:
         new_path: full dpath to new variable. The variable must not exist yet.
         new_val: plain value or json
+        in_file: force file where to change the value.
         """
-        val = self._convert_input_val(new_val)
-        self.log.info(f'Creating "{new_path}" with value "{new_val}" as type "{type(new_val)}"')
-        return dpath.util.new(self.netplan, new_path, new_val)
 
-    def del_entry(self, glob):
-        old_val = self.get_val(glob)
-        self.log.info(f'Deleting entry "{glob}" with value "{old_val}"')
-        return dpath.util.delete(self.netplan, glob)
+        # parent path to the new variable (so we can write it to the file that contains simmilar items)
+        base_path = os.path.dirname(new_path)
+        element_name = os.path.basename(new_path)
+        existing_entries = self.search_raw(base_path)
+
+        if in_file:
+            if not os.path.isfile(in_file):
+                raise NetplanEditorException(f'File "{in_file}" was not found"')
+            conf_file = in_file
+
+        elif existing_entries:
+            for items in existing_entries:
+                if element_name in items[2]:
+                    # don't allow adding an entry that already exists anywhere in config files
+                    raise NetplanEditorException(f'Entry "{new_path}" already exists in file "{items[0]}"')
+
+            # sort matched base_path entries by filename (search_raw() returns sorted by keys, not by filenames) 
+            # then pick first match and retrieve the conf filename
+            conf_file = sorted(existing_entries, key=lambda tup: tup[0], reverse=True)[0][0]
+
+        else:
+            # no match for upper path... add the element to the alphabetically last filename
+            conf_file = max(self.netplan.keys())
+        
+        val = self._convert_input_val(new_val)
+        self.log.info(f'Creating "{new_path}" with value "{new_val}" as type "{type(new_val)}" in file "{conf_file}"')
+        return dpath.util.new(self.netplan[conf_file], new_path, new_val)
+
+    def del_entry(self, glob, in_file=''):
+        """
+        Deletes first match of the `glob`.
+        Conf files with alphabetically higher number have a precedence (they override the earlier ones).
+
+        Params:
+        glob - wildcard match of the dict path !!within one yaml file!!
+        in_file: force file where to change the value.
+        """
+        if in_file:
+            if not os.path.isfile(in_file):
+                raise NetplanEditorException(f'File "{in_file}" was not found"')
+            conf = in_file
+
+        else:
+            conf = self._match_1st_source_file(path)
+
+        if conf:
+            old_val = dpath.util.get(self.netplan[conf], glob)
+            self.log.info(f'Deleting entry "{glob}" from file "{conf}" with value "{old_val}"')
+            return dpath.util.delete(self.netplan[conf], glob)
+
+        return False
 
 
 

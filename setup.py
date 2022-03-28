@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name = "netplan_editor",
-    version = "0.3",
+    version = "0.5",
     author = "YanChii",
     author_email = "janci@binaryparadise.com",
     description = "Library for searching and editing netplan yaml config files. Lib + cli (update-netplan).",

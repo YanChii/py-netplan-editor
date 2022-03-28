@@ -58,10 +58,7 @@ def update_netplan():
 
     cmd = sys.argv[1]
 
-    #src_file = f"{netplan_editor.NetplanEditor.default_netplan_dir}/{netplan_editor.NetplanEditor.default_target_confname}"
-    src_file = "/root/mynetplan/10-tachyum.yml"
-
-    netplan = netplan_editor.NetplanEditor(target_confname=src_file, logger=logger)
+    netplan = netplan_editor.NetplanEditor(logger=logger)
 
     if cmd == 'search_params':
         try:
@@ -70,9 +67,16 @@ def update_netplan():
             # default value
             target_match = '*'
 
-        print("%s\t\t\t\t%s" % ('PATH', 'VALUE'))
+        def tabularize(row:tuple):
+            entry_width = 39
+            out = ""
+            for x in row:
+                out += str(x).ljust(entry_width) + " "
+            return out
+
+        print(tabularize(('FILE', 'PATH', 'VALUE')))
         for item in netplan.search_params_all_interfaces(target_match):
-            print("%s\t%s" % (item[0], item[1]))
+            print(tabularize(item))
 
 
     elif cmd == 'get':
@@ -82,7 +86,12 @@ def update_netplan():
             print_help(1)
 
         val = netplan.get_val(target_path)
-        print(val, str(type(val)))
+        logger.debug(f'Type of the entry in get() is "{type(val)}"')
+        if val is None:
+            print(f"Error: entry not found: {target_path}", file=sys.stderr)
+            sys.exit(9)
+
+        print(val)
 
 
     elif cmd == 'delete':
@@ -114,7 +123,7 @@ def update_netplan():
             print_help(1)
 
         for target_path in netplan.search_params_all_interfaces(target_match):
-            netplan.set_val(target_path[0], target_val)
+            netplan.set_val(target_path[1], target_val, in_file=target_path[0])
 
         netplan.write()
 
